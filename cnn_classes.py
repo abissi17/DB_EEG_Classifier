@@ -1,20 +1,9 @@
-"""
-# My first app
-Here's our first attempt at using data to create a table:
-"""
-
-import streamlit as st
 import numpy as np
 import torch
 import torch.nn as nn
-from io import BytesIO
 
-st.title('Predicting Alzheimer\'s Disease with Machine Learning')
-st.text("By Decoded Brain")
-
-# Define the CNN model class (required for unpickling)
-# jerry's cnn class
-class ShuffleAttention(nn.Module):
+# Jerry's cnn class
+class ShuffleAttention_Jerry(nn.Module):
     def __init__(self, channels=128, groups=8):
         super().__init__()
 
@@ -76,7 +65,7 @@ class ShuffleAttention(nn.Module):
         out = self.channel_shuffle(out)
 
         return out
-class CSANet2(nn.Module):
+class CSANet_Jerry(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -103,10 +92,8 @@ class CSANet2(nn.Module):
             nn.Dropout(0.6)
         )
 
-        self.attention = ShuffleAttention(channels=128, groups=8)
-
+        self.attention = ShuffleAttention_Jerry(channels=128, groups=8)
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-
         self.fc = nn.Sequential(
             nn.Linear(128, 32),
             nn.ReLU(),
@@ -133,65 +120,85 @@ class CSANet2(nn.Module):
 
         return x
 
-# Load the trained model
-@st.cache_resource
-def load_model(model_name):
-    model = CSANet2()
-    state_dict = torch.load(model_name, map_location=torch.device('cpu'))
-    model.load_state_dict(state_dict)
-    model.eval()
-    return model
+# Jake's cnn class
+class ShuffleAttention(nn.Module):
+    def __init__(self, channels=128, groups=8):
+        super().__init__()
+        assert channels % (2 * groups) == 0, "channels must be divisible by 2 * groups"
+        self.channels = channels
+        self.groups = groups
+        branch_channels = channels // (2 * groups)
 
-model = load_model('jerry_model.pkl')
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.channel_fc = nn.Sequential(
+            nn.Conv2d(branch_channels, branch_channels, kernel_size=1),
+            nn.Sigmoid()
+        )
 
-# Prediction function
-def predict(uploaded_file):
-    try:
-        # Load the .npy file from uploaded bytes
-        bytes_data = uploaded_file.read()
-        data = np.load(BytesIO(bytes_data))
+        self.spatial_norm = nn.GroupNorm(num_groups=1, num_channels=branch_channels)
+        self.spatial_conv = nn.Sequential(
+            nn.Conv2d(branch_channels, branch_channels, kernel_size=3, padding=1),
+            nn.Sigmoid()
+        )
+        self.channel_shuffle = nn.ChannelShuffle(groups)
 
-        # Multiple epochs: (num_epochs, 19, 23, 118)
-        num_epochs, channels, freqs, times = data.shape
+    def forward(self, x):
+        B, C, H, W = x.shape
+        G = self.groups
+        x = x.reshape(B * G, C // G, H, W)
+        x_channel, x_spatial = torch.chunk(x, 2, dim=1)
 
-        if (channels, freqs, times) != (19, 23, 118):
-            return f"Error: Expected shape (N, 19, 23, 118), but got {data.shape}", None, None, None
+        channel_weight = self.channel_fc(self.avg_pool(x_channel))
+        x_channel = x_channel * channel_weight
 
-        # Convert all epochs to tensor
-        data_tensor = torch.tensor(data, dtype=torch.float32)
+        spatial_weight = self.spatial_conv(self.spatial_norm(x_spatial))
+        x_spatial = x_spatial * spatial_weight
 
-        # Process all epochs and average predictions
-        with torch.no_grad():
-            predictions = model(data_tensor)
-            probability = torch.sigmoid(predictions).mean().item()
+        out = torch.cat([x_channel, x_spatial], dim=1)
+        out = out.reshape(B, C, H, W)
+        out = self.channel_shuffle(out)
+        return out
+class CSANet2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=5, padding=1),
+            nn.InstanceNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Dropout(0.50)
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=5, padding=1),
+            nn.InstanceNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Dropout(0.60)
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.InstanceNorm2d(128),
+            nn.ReLU(),
+            nn.Dropout(0.60),
+            nn.MaxPool2d(2)
+        )
+        self.attention = ShuffleAttention(channels=128, groups=8)
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Sequential(
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.Dropout(0.40),
+            nn.Linear(32, 1)
+        )
 
-        # Interpret result
-        if probability >= 0.5:
-            result = "Alzheimer's Disease Detected"
-            confidence = probability * 100
-        else:
-            result = "Healthy (No Alzheimer's Disease)"
-            confidence = (1 - probability) * 100
-
-        return result, confidence, probability, num_epochs
-
-    except Exception as e:
-        return f"Error processing file: {str(e)}", None, None, None
-
-uploaded_file = st.file_uploader("Upload a .npy file (EEG Data)", type=["npy"])
-if uploaded_file is not None:
-    result = predict(uploaded_file)
-
-    if isinstance(result, tuple) and result[1] is not None:
-        prediction, confidence, probability, num_epochs = result
-        st.subheader("Prediction Result")
-        st.write(f"**{prediction}**")
-        st.write(f"Confidence: {confidence:.2f}%")
-        st.write(f"Raw Probability: {probability:.4f}")
-        st.write(f"Number of Epochs Processed: {num_epochs}")
-    else:
-        st.error(result[0])
-
-
-
-
+    def forward(self, x):
+        B, C, H, W = x.shape
+        x = x.reshape(B, 1, C * H, W)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.attention(x)
+        x = self.global_pool(x)
+        x = x.flatten(1)
+        x = self.fc(x)
+        return x
