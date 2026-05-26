@@ -3,9 +3,11 @@
 Here's our first attempt at using data to create a table:
 """
 
+import torch
+torch.classes.__path__ = []  # fix Streamlit file-watcher conflict with PyTorch
+
 import streamlit as st
 import numpy as np
-import torch
 from cnn_classes import CSANet2, ShuffleAttention
 from io import BytesIO
 
