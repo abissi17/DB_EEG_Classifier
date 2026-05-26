@@ -9,8 +9,32 @@ import torch
 import torch.nn as nn
 from io import BytesIO
 
+# Below must be included in every page file for the logo and website title to be the same across all pages
+# Inject custom CSS to increase the logo size
+st.html("""
+    <style>
+        [alt=Logo] {
+            height: 3.5rem; /* Adjust this value to make it larger or smaller */
+        }
+    </style>
+""")
+
+# st.logo("/Users/nabijade/Downloads/dashboard_visuals/db-trans.png")
+st.logo("/Users/nabijade/Downloads/dashboard_visuals/db-white-cover-removebg-preview.png")
+    
+# Setting DB logo for the browser tab    
+st.set_page_config(
+    page_title="Predicting Alzheimer's Disease with Machine Learning",
+    page_icon="/Users/nabijade/Downloads/dashboard_visuals/db-trans.png"
+) 
+
+with st.sidebar:
+    st.info("Please see **📈Motivation** for more!")
+    
 st.title('Predicting Alzheimer\'s Disease with Machine Learning')
 st.text("By Decoded Brain")
+
+st.page_link("/Users/nabijade/Desktop/Repositories/DB_EEG_Classifier/pages/1_📈Motivation.py", label="Go to Motivation Page", icon="ℹ️")
 
 # Define the CNN model class (required for unpickling)
 # jerry's cnn class

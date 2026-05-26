@@ -1,0 +1,23 @@
+5/25
+- update the epoch graph to display one channel
+    - idk which channel
+    - the graph is still not displaying segments
+        - i'm thinking of manually putting boxes around each segment showing overlap but this defeats the purpose of using code
+    - realized i didn't fully understand ica
+    - i don't think ica is being properly implemented... shouldn't fit be called before apply
+5/26
+- updated the epoch graph again by using the picks function to display one channel
+- i wonder how to display it with segments though
+- figured out how to display images side by side: syntax is to use angled brackets in one line for st.image instead of separate lines
+- i asked abi why the model only accepts numpy arrays - we talked about it before but i forgot the reason
+- i reminded the StreamLit team to finish their tasks by tonight - it's a little unfair because i didn't realize we should finish this by wednesday
+    - i think it's okay if they finish by friday instead, as long as it's before the end of the week when all initiatives close
+- right now the quality of the pics are low
+- as of 8:42 AM i'm thinking of splitting up the headers so i can comprehensively go through each of the varying results we got - do people care about this though?
+- i wonder if there's a toggle feature that would be beneficial for our model...
+- as of 8:58 AM i split up the overview headings to be separate pages with emojis in the names - so cool lol
+- as of 10:02 AM i added the DB logo to the browser name and side panel + realized that a GitHub repo is automatically linked to the dashboard
+- Abi has deployed the StreamLit app so whenever I push changes to the repo, the changes will automatically register and will be active on the internet!
+- tasks: 
+    - still need to add contact info
+    - now i want to change the layout to be like this guy's (https://tfinder-ipmc.streamlit.app/)
