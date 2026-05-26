@@ -6,7 +6,7 @@ Here's our first attempt at using data to create a table:
 import streamlit as st
 import numpy as np
 import torch
-import torch.nn as nn
+from cnn_classes import CSANet2, ShuffleAttention
 from io import BytesIO
 
 # Below must be included in every page file for the logo and website title to be the same across all pages
@@ -36,137 +36,36 @@ st.text("By Decoded Brain")
 
 st.page_link("/Users/nabijade/Desktop/Repositories/DB_EEG_Classifier/pages/1_📈Motivation.py", label="Go to Motivation Page", icon="ℹ️")
 
-# Define the CNN model class (required for unpickling)
-# jerry's cnn class
-class ShuffleAttention(nn.Module):
-    def __init__(self, channels=128, groups=8):
-        super().__init__()
-
-        assert channels % (2 * groups) == 0, \
-            "channels must be divisible by 2 * groups"
-
-        self.channels = channels
-        self.groups = groups
-
-        branch_channels = channels // (2 * groups)
-
-        # Channel attention branch
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-
-        self.channel_fc = nn.Sequential(
-            nn.Conv2d(branch_channels, branch_channels, kernel_size=1),
-            nn.Sigmoid()
-        )
-
-        # Spatial attention branch
-        self.spatial_norm = nn.GroupNorm(
-            num_groups=1,
-            num_channels=branch_channels
-        )
-
-        self.spatial_conv = nn.Sequential(
-            nn.Conv2d(branch_channels, branch_channels, kernel_size=3, padding=1),
-            nn.Sigmoid()
-        )
-
-        # PyTorch built-in ChannelShuffle
-        self.channel_shuffle = nn.ChannelShuffle(groups)
-
-    def forward(self, x):
-        B, C, H, W = x.shape
-        G = self.groups
-
-        # split feature map into G groups
-        x = x.reshape(B * G, C // G, H, W)
-
-        # split each group into channel-attention branch and spatial-attention branch
-        x_channel, x_spatial = torch.chunk(x, chunks=2, dim=1)
-
-        # channel attention
-        channel_weight = self.channel_fc(self.avg_pool(x_channel))
-        x_channel = x_channel * channel_weight
-
-        # spatial attention
-        spatial_weight = self.spatial_conv(self.spatial_norm(x_spatial))
-        x_spatial = x_spatial * spatial_weight
-
-        # concat two branches
-        out = torch.cat([x_channel, x_spatial], dim=1)
-
-        # restore to original shape
-        out = out.reshape(B, C, H, W)
-
-        # shuffle channels
-        out = self.channel_shuffle(out)
-
-        return out
-class CSANet2(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=5, padding=1),
-            nn.InstanceNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.5)
-        )
-
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=5, padding=1),
-            nn.InstanceNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.6)
-        )
-
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.InstanceNorm2d(128),
-            nn.ReLU(),
-            nn.Dropout(0.6)
-        )
-
-        self.attention = ShuffleAttention(channels=128, groups=8)
-
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-
-        self.fc = nn.Sequential(
-            nn.Linear(128, 32),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(32, 1)
-        )
-
-    def forward(self, x):
-        B, C, H, W = x.shape
-
-        # (B, 19, 23, 118) -> (B, 1, 19*23, 118)
-        x = x.reshape(B, 1, C * H, W)
-
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-
-        x = self.attention(x)
-
-        x = self.global_pool(x)
-        x = x.flatten(1)
-
-        x = self.fc(x)
-
-        return x
-
 # Load the trained model
 @st.cache_resource
 def load_model(model_name):
-    model = CSANet2()
-    state_dict = torch.load(model_name, map_location=torch.device('cpu'))
-    model.load_state_dict(state_dict)
+    import io
+    import pickle
+    import __main__
+    import torch.storage as _torch_storage
+
+    __main__.CSANet2 = CSANet2
+    __main__.ShuffleAttention = ShuffleAttention
+
+    # jake_cnn_2.pkl was saved with raw pickle.dump (not torch.save), so
+    # torch.load misreads the format. We load with plain pickle instead.
+    # The CUDA storage bytes embedded in the pickle are loaded via
+    # torch.storage._load_from_bytes, which calls torch.load internally
+    # with no map_location. We patch it to force CPU before unpickling.
+    _orig = _torch_storage._load_from_bytes
+    _torch_storage._load_from_bytes = lambda b: torch.load(
+        io.BytesIO(b), map_location='cpu'
+    )
+    try:
+        with open(model_name, 'rb') as f:
+            model = pickle.load(f)
+    finally:
+        _torch_storage._load_from_bytes = _orig
+
     model.eval()
     return model
 
-model = load_model('jerry_model.pkl')
+model = load_model('jake_cnn_2.pkl')
 
 # Prediction function
 def predict(uploaded_file):
@@ -175,9 +74,13 @@ def predict(uploaded_file):
         bytes_data = uploaded_file.read()
         data = np.load(BytesIO(bytes_data))
 
-        # Multiple epochs: (num_epochs, 19, 23, 118)
-        num_epochs, channels, freqs, times = data.shape
+        if data.ndim == 3:
+            # Single epoch (19, 23, 118) — add batch dimension
+            data = data[np.newaxis]
+        elif data.ndim != 4:
+            return f"Error: Expected 3D or 4D array, but got shape {data.shape}", None, None, None
 
+        num_epochs, channels, freqs, times = data.shape
         if (channels, freqs, times) != (19, 23, 118):
             return f"Error: Expected shape (N, 19, 23, 118), but got {data.shape}", None, None, None
 
@@ -190,7 +93,7 @@ def predict(uploaded_file):
             probability = torch.sigmoid(predictions).mean().item()
 
         # Interpret result
-        if probability >= 0.5:
+        if probability >= 0.6:
             result = "Alzheimer's Disease Detected"
             confidence = probability * 100
         else:
@@ -215,7 +118,3 @@ if uploaded_file is not None:
         st.write(f"Number of Epochs Processed: {num_epochs}")
     else:
         st.error(result[0])
-
-
-
-

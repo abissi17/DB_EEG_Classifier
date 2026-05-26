@@ -21,3 +21,4 @@
 - tasks: 
     - still need to add contact info
     - now i want to change the layout to be like this guy's (https://tfinder-ipmc.streamlit.app/)
+    - need to pull and push changes appropriatelely
